@@ -36,8 +36,7 @@ A local API service designed to download YouTube videos (including livestreams a
   {
       "videoId": "VIDEO_ID",
       "videoUrl": "https://youtube.com/watch?v=VIDEO_ID",
-      "title": "Video Title",
-      "bucket": "s3-bucket-name"
+      "title": "Video Title"
   }
   ```
   *Accepts a single object or an array of objects.*
