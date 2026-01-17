@@ -54,3 +54,8 @@ A local API service designed to download YouTube videos (including livestreams a
 - **Endpoint:** `GET /check-live?channel=@ChannelHandle`
 - **Description:** Checks if a YouTube channel is currently live.
 - **Response:** JSON object containing `is_live` status and stream details if available.
+
+### 6. Get Channel Info
+- **Endpoint:** `GET /channel-info?channel=@ChannelHandle`
+- **Description:** Retrieves full metadata for a channel using `yt-dlp`.
+- **Response:** JSON object containing channel metadata (as returned by `yt-dlp --dump-single-json`).

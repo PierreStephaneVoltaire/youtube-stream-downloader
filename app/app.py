@@ -434,6 +434,66 @@ def check_live():
         }), 500
 
 
+@app.route('/channel-info', methods=['GET'])
+def channel_info():
+    """Get channel metadata."""
+    channel = request.args.get('channel')
+    if not channel:
+        return jsonify({'error': 'Missing channel parameter'}), 400
+
+    # Sanitize input: allow only alphanumeric, @, _, -
+    if not re.match(r'^[a-zA-Z0-9@_-]+$', channel):
+        return jsonify({'error': 'Invalid channel format'}), 400
+
+    # Handle both full URL and handle
+    if channel.startswith('@'):
+        url = f'https://www.youtube.com/{channel}'
+    else:
+        # Assume it's a handle without @ or just the name, though yt-dlp is smart
+        # best to ensure we form a valid URL or pass it such that yt-dlp understands
+        url = f'https://www.youtube.com/@{channel}' if not channel.startswith('http') else channel
+
+    cmd = [
+        'yt-dlp',
+        '--cookies', COOKIES_FILE,
+        '--dump-single-json',
+        '--skip-download',
+        '--no-playlist',
+        '--socket-timeout', '10',
+        url
+    ]
+
+    try:
+        process = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=20
+        )
+
+        if process.returncode != 0:
+            stderr = process.stderr.lower() if process.stderr else ""
+            if "404" in stderr or "not found" in stderr:
+                return jsonify({'error': 'Channel not found'}), 404
+            
+            logger.error(f"yt-dlp error getting channel info: {process.stderr}")
+            return jsonify({'error': 'Failed to fetch channel info', 'detail': process.stderr}), 500
+
+        try:
+            data = json.loads(process.stdout)
+            return jsonify(data)
+        except json.JSONDecodeError:
+             logger.error("Failed to parse yt-dlp JSON output for channel info")
+             return jsonify({'error': 'Failed to parse channel info'}), 500
+
+    except subprocess.TimeoutExpired:
+        logger.error(f"Timeout getting info for {channel}")
+        return jsonify({'error': 'Timeout fetching channel info'}), 500
+    except Exception as e:
+        logger.error(f"Unexpected error getting channel info for {channel}: {e}")
+        return jsonify({'error': 'Internal server error', 'detail': str(e)}), 500
+
+
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8080))
     logger.info(f"Starting server on port {port}")
