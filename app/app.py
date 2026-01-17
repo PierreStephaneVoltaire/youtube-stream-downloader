@@ -31,7 +31,7 @@ COOKIES_FILE = os.environ.get('COOKIES_FILE', os.path.expanduser('./.config/cook
 DOWNLOAD_DIR = os.environ.get('DOWNLOAD_DIR', '/tmp/yt-downloads')
 AWS_PROFILE = os.environ.get('AWS_PROFILE', None)
 AWS_REGION = os.environ.get('AWS_DEFAULT_REGION', 'ca-central-1')
-COOKIES_PARAMETER = os.environ.get('COOKIES_PARAMETER', '/personalai/dev/youtube/cookies')
+COOKIES_PARAMETER = os.environ.get('COOKIES_PARAMETER')
 BACKUP_BUCKET = os.environ.get('BACKUP_BUCKET')
 
 # Track job status
