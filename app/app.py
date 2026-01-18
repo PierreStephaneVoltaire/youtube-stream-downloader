@@ -458,7 +458,7 @@ def channel_info():
         '--cookies', COOKIES_FILE,
         '--dump-single-json',
         '--skip-download',
-        '--no-playlist',
+        '--playlist-items', '0,0',
         '--socket-timeout', '10',
         url
     ]
