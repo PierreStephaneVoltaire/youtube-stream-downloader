@@ -33,3 +33,20 @@ variable "aws_secret_key" {
   type        = string
   sensitive   = true
 }
+
+variable "do_token" {
+  description = "DigitalOcean API token"
+  type        = string
+  sensitive   = true
+}
+
+variable "do_cluster_name" {
+  description = "DigitalOcean Kubernetes cluster name"
+  type        = string
+}
+
+variable "cookies_file_path" {
+  description = "Path to the YouTube cookies file (default: .cookies/cookies.txt)"
+  type        = string
+  default     = "../.cookies/cookies.txt"
+}

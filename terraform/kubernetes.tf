@@ -18,6 +18,19 @@ resource "kubernetes_secret" "yt_backup_creds" {
   type = "Opaque"
 }
 
+resource "kubernetes_secret" "yt_cookies" {
+  metadata {
+    name      = "yt-cookies"
+    namespace = kubernetes_namespace.yt_backup.metadata[0].name
+  }
+
+  data = {
+    "cookies.txt" = file(var.cookies_file_path)
+  }
+
+  type = "Opaque"
+}
+
 data "aws_ecr_authorization_token" "token" {}
 
 resource "kubernetes_secret" "ecr_registry" {
@@ -49,10 +62,10 @@ resource "kubernetes_persistent_volume_claim" "yt_backup_pvc" {
     access_modes = ["ReadWriteOnce"]
     resources {
       requests = {
-        storage = "50Gi"
+        storage = "10Gi"
       }
     }
-    storage_class_name = "local-path"
+    storage_class_name = "do-block-storage"
   }
   
   wait_until_bound = false
@@ -84,8 +97,20 @@ resource "kubernetes_deployment" "yt_backup" {
           app = "yt-backup"
         }
       }
+     
 
       spec {
+           node_selector = {
+          "workload-type" = "general"
+        }
+        
+        toleration {
+          key      = "dedicated"
+          operator = "Equal"
+          value    = "general"
+          effect   = "NoSchedule"
+        }
+
         image_pull_secrets {
           name = kubernetes_secret.ecr_registry.metadata[0].name
         }
@@ -118,9 +143,19 @@ resource "kubernetes_deployment" "yt_backup" {
             name  = "COOKIES_PARAMETER"
             value = var.cookies_parameter_name
           }
+
+          volume_mount {
+            name       = "cookies"
+            mount_path = "/.config"
+            read_only  = true
+          }
           env {
             name  = "BACKUP_BUCKET"
             value = aws_s3_bucket.youtube_backup.bucket
+          }
+          env {
+            name  = "TZ"
+            value = "America/New_York"
           }
           env {
             name = "AWS_ACCESS_KEY_ID"
@@ -148,12 +183,10 @@ resource "kubernetes_deployment" "yt_backup" {
 
           resources {
             requests = {
-              memory = "256Mi"
-              cpu    = "2000m"
+              memory = "128Mi"
             }
             limits = {
-              memory = "4Gi"
-              cpu    = "8000m"
+              memory = "1Gi"
             }
           }
 
@@ -180,6 +213,17 @@ resource "kubernetes_deployment" "yt_backup" {
           name = "download-storage"
           persistent_volume_claim {
             claim_name = kubernetes_persistent_volume_claim.yt_backup_pvc.metadata[0].name
+          }
+        }
+
+        volume {
+          name = "cookies"
+          secret {
+            secret_name = kubernetes_secret.yt_cookies.metadata[0].name
+            items {
+              key  = "cookies.txt"
+              path = "cookies.txt"
+            }
           }
         }
       }

@@ -15,7 +15,6 @@ from datetime import datetime
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import boto3
-from botocore.exceptions import ClientError
 
 app = Flask(__name__)
 CORS(app)
@@ -27,11 +26,11 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Configuration
-COOKIES_FILE = os.environ.get('COOKIES_FILE', os.path.expanduser('./.config/cookies.txt'))
+COOKIES_MOUNT_PATH = '/.config/cookies.txt'  # Read-only mount from K8s Secret
+COOKIES_FILE = '/tmp/.config/cookies.txt'    # Writable copy for yt-dlp
 DOWNLOAD_DIR = os.environ.get('DOWNLOAD_DIR', '/tmp/yt-downloads')
 AWS_PROFILE = os.environ.get('AWS_PROFILE', None)
 AWS_REGION = os.environ.get('AWS_DEFAULT_REGION', 'ca-central-1')
-COOKIES_PARAMETER = os.environ.get('COOKIES_PARAMETER')
 BACKUP_BUCKET = os.environ.get('BACKUP_BUCKET')
 
 # Track job status
@@ -40,46 +39,16 @@ jobs = {}
 # Ensure download dir exists
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-
-def download_cookies_from_ssm():
-    """Download YouTube cookies from AWS SSM Parameter Store."""
-    try:
-        logger.info(f"Downloading cookies from Parameter Store: {COOKIES_PARAMETER}")
-
-        ssm = boto3.client('ssm', region_name=AWS_REGION)
-        response = ssm.get_parameter(
-            Name=COOKIES_PARAMETER,
-            WithDecryption=True
-        )
-
-        cookies_content = response['Parameter']['Value']
-
-        # Ensure directory exists
-        cookies_dir = os.path.dirname(COOKIES_FILE)
-        os.makedirs(cookies_dir, exist_ok=True)
-
-        # Write cookies to file
-        with open(COOKIES_FILE, 'w') as f:
-            f.write(cookies_content)
-
-        logger.info(f"Cookies downloaded successfully to {COOKIES_FILE}")
-        return True
-
-    except ClientError as e:
-        error_code = e.response['Error']['Code']
-        if error_code == 'ParameterNotFound':
-            logger.warning(f"Cookies parameter not found: {COOKIES_PARAMETER}")
-            logger.warning("Will attempt to use existing cookies file if available")
-        else:
-            logger.error(f"Error downloading cookies from Parameter Store: {e}")
-        return False
-    except Exception as e:
-        logger.error(f"Unexpected error downloading cookies: {e}")
-        return False
-
-
-# Download cookies at startup
-download_cookies_from_ssm()
+# Copy cookies from read-only mount to writable location
+if os.path.exists(COOKIES_MOUNT_PATH):
+    os.makedirs(os.path.dirname(COOKIES_FILE), exist_ok=True)
+    with open(COOKIES_MOUNT_PATH, 'r') as src:
+        cookies_content = src.read()
+    with open(COOKIES_FILE, 'w') as dst:
+        dst.write(cookies_content)
+    logger.info(f"Cookies copied from {COOKIES_MOUNT_PATH} to {COOKIES_FILE}")
+else:
+    logger.error(f"No cookies file found at {COOKIES_MOUNT_PATH}. YouTube authentication will fail.")
 
 
 def download_video(video_url: str, video_id: str, output_dir: str) -> str:
@@ -90,6 +59,7 @@ def download_video(video_url: str, video_id: str, output_dir: str) -> str:
     cmd = [
         'yt-dlp',
         '--cookies', COOKIES_FILE,
+        '--remote-components', 'ejs:github',
         '--output', output_template,
         # Best quality: best video + best audio, merge with ffmpeg
         '-f', 'bestvideo+bestaudio/best',
@@ -123,6 +93,7 @@ def download_video(video_url: str, video_id: str, output_dir: str) -> str:
     process.wait()
 
     if process.returncode != 0:
+        logger.error(f"yt-dlp failed with return code {process.returncode}")
         raise Exception(f"yt-dlp failed with return code {process.returncode}")
 
     # Find the output file
@@ -321,6 +292,7 @@ def check_live():
     cmd = [
         'yt-dlp',
         '--cookies', COOKIES_FILE,
+        '--remote-components', 'ejs:github',
         '--dump-json',
         '--skip-download',
         '--no-playlist',
@@ -339,6 +311,15 @@ def check_live():
         )
 
         stderr = process.stderr.lower() if process.stderr else ""
+        stdout = process.stdout if process.stdout else ""
+
+        # Log yt-dlp failure for debugging
+        if process.returncode != 0:
+            logger.error(f"yt-dlp check-live failed with return code {process.returncode}")
+            if process.stderr:
+                logger.error(f"yt-dlp stderr: {process.stderr}")
+            if stdout:
+                logger.error(f"yt-dlp stdout: {stdout}")
 
         # Check for specific errors first
         if "join this channel" in stderr or "members-only" in stderr:
@@ -373,6 +354,28 @@ def check_live():
                 "error": "Channel not found",
                 "checked_at": checked_at
             }), 404
+
+        # Scheduled live stream (not started yet) - treat as offline
+        if "live event will begin in" in stderr or "this live event will begin" in stderr:
+            # Extract minutes if available
+            minutes_match = re.search(r'(\d+)\s*minutes?', stderr)
+            if minutes_match:
+                minutes = int(minutes_match.group(1))
+                return jsonify({
+                    "is_live": False,
+                    "stream": None,
+                    "error": None,
+                    "scheduled": True,
+                    "starts_in_minutes": minutes,
+                    "checked_at": checked_at
+                })
+            return jsonify({
+                "is_live": False,
+                "stream": None,
+                "error": None,
+                "scheduled": True,
+                "checked_at": checked_at
+            })
 
         # Success - Live
         if process.returncode == 0 and process.stdout:
@@ -456,6 +459,7 @@ def channel_info():
     cmd = [
         'yt-dlp',
         '--cookies', COOKIES_FILE,
+        '--remote-components', 'ejs:github',
         '--dump-single-json',
         '--skip-download',
         '--playlist-items', '0,0',
@@ -473,10 +477,15 @@ def channel_info():
 
         if process.returncode != 0:
             stderr = process.stderr.lower() if process.stderr else ""
+            stdout = process.stdout if process.stdout else ""
+            logger.error(f"yt-dlp channel-info failed with return code {process.returncode}")
+            if process.stderr:
+                logger.error(f"yt-dlp stderr: {process.stderr}")
+            if stdout:
+                logger.error(f"yt-dlp stdout: {stdout}")
             if "404" in stderr or "not found" in stderr:
                 return jsonify({'error': 'Channel not found'}), 404
             
-            logger.error(f"yt-dlp error getting channel info: {process.stderr}")
             return jsonify({'error': 'Failed to fetch channel info', 'detail': process.stderr}), 500
 
         try:

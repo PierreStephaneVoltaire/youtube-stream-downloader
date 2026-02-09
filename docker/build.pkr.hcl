@@ -23,7 +23,8 @@ source "docker" "ytbackup" {
     "WORKDIR /app",
     "EXPOSE 8080",
     "CMD [\"python\", \"app.py\"]",
-    "ENV PORT 8080"
+    "ENV PORT 8080",
+    "ENV TZ=America/New_York"
   ]
 }
 
@@ -37,6 +38,24 @@ build {
       "apt-get update && apt-get install -y ffmpeg curl unzip ca-certificates",
       "rm -rf /var/lib/apt/lists/*",
       "mkdir -p /app"
+    ]
+  }
+
+  # Install Deno (JavaScript runtime required by yt-dlp for YouTube extraction)
+  provisioner "shell" {
+    inline = [
+      "curl -fsSL https://deno.land/install.sh | sh",
+      "mv /root/.deno/bin/deno /usr/local/bin/deno",
+      "deno --version"
+    ]
+  }
+
+  # Enable yt-dlp remote components for JS challenge solving
+  # This creates the config directory and sets up the environment
+  provisioner "shell" {
+    inline = [
+      "mkdir -p /root/.config/yt-dlp",
+      "echo '--remote-components ejs:github' > /root/.config/yt-dlp/config"
     ]
   }
 
