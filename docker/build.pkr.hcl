@@ -79,6 +79,7 @@ build {
   provisioner "shell" {
     inline = [
       "pip install --no-cache-dir -r /app/requirements.txt",
+      "yt-dlp -U",
       "yt-dlp --version"
     ]
   }
