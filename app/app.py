@@ -296,7 +296,6 @@ def check_live():
         '--dump-json',
         '--skip-download',
         '--no-playlist',
-        '--socket-timeout', '10',
         f'https://www.youtube.com/{channel}/live'
     ]
 
@@ -307,19 +306,24 @@ def check_live():
             cmd,
             capture_output=True,
             text=True,
-            timeout=15
+            timeout=30
         )
 
         stderr = process.stderr.lower() if process.stderr else ""
         stdout = process.stdout if process.stdout else ""
 
+        # Log yt-dlp output for debugging
+        logger.info(f"yt-dlp check-live return code: {process.returncode}")
+        if process.stderr:
+            logger.info(f"yt-dlp stderr: {process.stderr[:500]}")
+        if stdout:
+            logger.info(f"yt-dlp stdout length: {len(stdout)}, first 200 chars: {stdout[:200]}")
+        else:
+            logger.warning("yt-dlp stdout is empty!")
+
         # Log yt-dlp failure for debugging
         if process.returncode != 0:
             logger.error(f"yt-dlp check-live failed with return code {process.returncode}")
-            if process.stderr:
-                logger.error(f"yt-dlp stderr: {process.stderr}")
-            if stdout:
-                logger.error(f"yt-dlp stdout: {stdout}")
 
         # Check for specific errors first
         if "join this channel" in stderr or "members-only" in stderr:
@@ -403,12 +407,27 @@ def check_live():
                         "error": None,
                         "checked_at": checked_at
                     })
-            except json.JSONDecodeError:
-                logger.error("Failed to parse yt-dlp JSON output")
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse yt-dlp JSON output: {e}")
+                logger.error(f"yt-dlp stdout (first 500 chars): {process.stdout[:500] if process.stdout else 'None'}")
+                return jsonify({
+                    "is_live": False,
+                    "stream": None,
+                    "error": "Failed to parse stream info",
+                    "detail": "JSON decode error",
+                    "checked_at": checked_at
+                }), 500
 
         # Success - Offline
         # Covers: "not currently live", non-zero exit code (if not caught above),
         # or returncode 0 but is_live=False
+
+        # Log stdout/stderr for debugging even when offline
+        if stderr:
+            logger.info(f"yt-dlp check-live stderr: {stderr}")
+        if stdout:
+            logger.info(f"yt-dlp check-live stdout: {stdout}")
+
         return jsonify({
             "is_live": False,
             "stream": None,
